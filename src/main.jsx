@@ -1,32 +1,16 @@
 import React from "react";
 import ReactDOM from "react-dom/client";
-import App from "./App";
-import { createAppKit } from "@reown/appkit/react";
+import App from "./App.jsx";
+import { AppKitProvider } from "@reown/appkit/react";
 import { WagmiAdapter } from "@reown/appkit-adapter-wagmi";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { REOWN_PROJECT_ID, CHAINS } from "./config";
+import { SolanaAdapter } from "@reown/appkit-adapter-solana";
+import { REOWN_PROJECT_ID, CHAINS, SOLANA_NETWORK } from "./config";
 
-const queryClient = new QueryClient();
-
-const wagmiAdapter = new WagmiAdapter({
-  projectId: REOWN_PROJECT_ID,
-  chains: CHAINS
-});
-
-createAppKit({
-  adapters: [wagmiAdapter],
-  projectId: REOWN_PROJECT_ID,
-  networks: CHAINS,
-  metadata: {
-    name: "Web3 dApp",
-    description: "Native balance sender",
-    url: "http://localhost:5173",
-    icons: []
-  }
-});
+const wagmiAdapter = new WagmiAdapter({ projectId: REOWN_PROJECT_ID, chains: CHAINS });
+const solanaAdapter = new SolanaAdapter({ projectId: REOWN_PROJECT_ID, network: SOLANA_NETWORK });
 
 ReactDOM.createRoot(document.getElementById("root")).render(
-  <QueryClientProvider client={queryClient}>
+  <AppKitProvider adapters={[wagmiAdapter, solanaAdapter]} projectId={REOWN_PROJECT_ID}>
     <App />
-  </QueryClientProvider>
+  </AppKitProvider>
 );
